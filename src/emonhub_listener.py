@@ -185,12 +185,12 @@ class EmonHubSerialListener(EmonHubListener):
         # Process data frame
         return self._process_frame(f)
 
-"""class EmonHubRFM2PiListener
+"""class EmonHubJeeListener
 
-Monitors the serial port for data from RFM2Pi
+Monitors the serial port for data from a Jeelib-based device
 
 """
-class EmonHubRFM2PiListener(EmonHubSerialListener):
+class EmonHubJeeListener(EmonHubSerialListener):
 
     def __init__(self, com_port):
         """Initialize listener
@@ -200,7 +200,7 @@ class EmonHubRFM2PiListener(EmonHubSerialListener):
         """
         
         # Initialization
-        super(EmonHubRFM2PiListener, self).__init__(com_port)
+        super(EmonHubJeeListener, self).__init__(com_port)
 
         # Initialize settings
         self._settings = {'baseid': '', 'frequency': '', 'sgroup': '', 
@@ -209,13 +209,26 @@ class EmonHubRFM2PiListener(EmonHubSerialListener):
         # Initialize time updata timestamp
         self._time_update_timestamp = 0
 
+    def _check_frame(self, received):
+
+        # If information message, discard
+        if ((received[0] == '>') or (received[0] == '->')):
+            return False
+            
+        # If SOH character, discard 
+        # This happens at startup and generates useless warnings
+        if (received[0] == '\x01'):
+            self._log.info("Ignoring frame consisting of SOH character")
+            return False
+
+        else:
+            return True
+
     def _process_frame(self, f):
         """Process a frame of data
 
-        f (string): 'NodeID val1_lsb val1_msb val2_lsb val2_msb ...'
+        f (string): 'NodeID val1 val2...'
 
-        This function recombines the integers and checks their validity.
-        
         Return data as a list: [NodeID, val1, val2]
 
         """
@@ -226,46 +239,25 @@ class EmonHubRFM2PiListener(EmonHubSerialListener):
         # Get an array out of the space separated string
         received = f.strip().split(' ')
         
-        # If information message, discard
-        if ((received[0] == '>') or (received[0] == '->')):
-            return
-            
-        if (received[0] == '\x01'):
-            self._log.info("Ignoring frame consisting of SOH character")
+        # Discard frame if it does not contain data
+        if (self._check_frame(received) is False):
             return
 
-        # Else, discard if frame not of the form 
-        # [node val1_lsb val1_msb val2_lsb val2_msb ...]
-        # with number of elements odd and at least 3
-        elif ((not (len(received) & 1)) or (len(received) < 3)):
+        # Discard if frame not of the form [node, val1, ...]
+        # with number of elements at least 2
+        if (len(received) < 2):
             self._log.warning("Misformed RX frame: " + str(received))
         
         # Else, process frame
         else:
             try:
-                # Only integers are expected
-                received = [int(val) for val in received]
+                received = [float(val) for val in received]
             except Exception:
                 self._log.warning("Misformed RX frame: " + str(received))
             else:
-                # Get node ID
-                node = received[0]
-                
-                # Recombine transmitted chars into signed int
-                values = []
-                for i in range(1, len(received),2):
-                    value = (received[i+1] << 8) + received[i]
-                    if value >= 32768:
-                        value -= 65536
-                    values.append(value)
-                
-                self._log.debug("Node: " + str(node))
-                self._log.debug("Values: " + str(values))
-    
-                # Insert node ID before data
-                values.insert(0, node)
-
-                return values
+                self._log.debug("Node: " + str(received[0]))
+                self._log.debug("Values: " + str(received[1:]))
+                return received
 
     def set(self, **kwargs):
         """Send configuration parameters to the RFM2Pi through COM port
@@ -330,6 +322,68 @@ class EmonHubRFM2PiListener(EmonHubSerialListener):
 
         self._ser.write("00,%02d,%02d,00,s" % (now.hour, now.minute))
 
+"""class EmonHubJeeCombineListener
+
+Monitors the serial port for data from a Jeelib based device
+and recombine each pair of bytes into an integer
+
+"""
+class EmonHubJeeCombineListener(EmonHubJeeListener):
+
+    def _process_frame(self, f):
+        """Process a frame of data
+
+        f (string): 'NodeID val1_lsb val1_msb val2_lsb val2_msb ...'
+
+        This function recombines the integers and checks their validity.
+        
+        Return data as a list: [NodeID, val1, val2]
+
+        """
+        
+        # Log data
+        self._log.info("Serial RX: " + f)
+        
+        # Get an array out of the space separated string
+        received = f.strip().split(' ')
+        
+        # Discard frame if it does not contain data
+        if (self._check_frame(received) is False):
+            return
+
+        # Else, discard if frame not of the form 
+        # [node val1_lsb val1_msb val2_lsb val2_msb ...]
+        # with number of elements odd and at least 3
+        elif ((not (len(received) & 1)) or (len(received) < 3)):
+            self._log.warning("Misformed RX frame: " + str(received))
+        
+        # Else, process frame
+        else:
+            try:
+                # Only integers are expected
+                received = [int(val) for val in received]
+            except Exception:
+                self._log.warning("Misformed RX frame: " + str(received))
+            else:
+                # Get node ID
+                node = received[0]
+                
+                # Recombine transmitted chars into signed int
+                values = []
+                for i in range(1, len(received),2):
+                    value = (received[i+1] << 8) + received[i]
+                    if value >= 32768:
+                        value -= 65536
+                    values.append(value)
+                
+                self._log.debug("Node: " + str(node))
+                self._log.debug("Values: " + str(values))
+    
+                # Insert node ID before data
+                values.insert(0, node)
+
+                return values
+
 """class EmonHubSocketListener
 
 Monitors a socket for data, typically from ethernet link
@@ -391,13 +445,13 @@ class EmonHubSocketListener(EmonHubListener):
             f, self._sock_rx_buf = self._sock_rx_buf.split('\r\n', 1)
             return self._process_frame(f)
 
-"""class EmonHubRFM2PiListenerRepeater
+"""class EmonHubJeeCombineListenerRepeater
 
-Monitors the serial port for data from RFM2Pi, 
+Monitors the serial port for data from a Jeelib based device, 
 and repeats on RF link the frames received through a socket
 
 """
-class EmonHubRFM2PiListenerRepeater(EmonHubRFM2PiListener):
+class EmonHubJeeCombineListenerRepeater(EmonHubJeeCombineListener):
 
     def __init__(self, com_port, port_nb):
         """Initialize listener
