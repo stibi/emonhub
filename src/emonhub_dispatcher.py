@@ -238,6 +238,7 @@ class EmonHubEmoncmsDispatcher(EmonHubDispatcher):
 
         # add or alter any default settings for this dispatcher
         self._defaults.update({'maxItemsPerPost': 100, 'url': 'http://emoncms.org'})
+        self._defaults.update({'emoncmsinterval': 3600, 'emoncms': False})
         self._settings.update({'apikey': ''})
 
         # This line will stop the default values printing to logfile at start-up
@@ -245,6 +246,25 @@ class EmonHubEmoncmsDispatcher(EmonHubDispatcher):
 
         # set an absolute upper limit for number of items to process per post
         self._item_limit = 250
+
+        # Initialize additional interval timer for emoncms last ping timestamp
+        self._emoncmsinterval_timestamp = 0
+
+    def action(self):
+        """
+
+        :return:
+        """
+        # Perform the standard action tasks
+        super(EmonHubEmoncmsDispatcher, self).action()
+
+        # If an pinginterval is set, check if that time has passed since last post
+        if int(self._settings['emoncmsinterval']) and time.time() - self._emoncmsinterval_timestamp < int(self._settings['emoncmsinterval']):
+            return
+        else:
+            # Then ping emoncms server
+            if self._ping_emoncms():
+                self._emoncmsinterval_timestamp = time.time()
 
     def _process_post(self, databuffer):
         """Send data to server."""
@@ -286,6 +306,31 @@ class EmonHubEmoncmsDispatcher(EmonHubDispatcher):
             return True
         else:
             self._log.warning("Send failure: wanted 'ok' but got "+reply)
+
+    def _ping_emoncms(self):
+        """
+
+        :return:
+        """
+
+        if not self._settings['emoncms'] in ('myip','hub'):
+            return
+        self._log.info("Updating IP address for emonHub at: " + self._settings['url'])
+        post = str(self._settings['url']+ "/" + self._settings['emoncms'] \
+                   + "/set.json?apikey=" + self._settings['apikey'])
+
+        if self._settings['emoncms'] == 'hub':
+            post = post + "&hubid=Hub1" + "&hubtime=" + str(int(time.time()))
+            # TODO temporarily added timestamp & hard-coded hubid
+
+        reply = self._send_post(post)
+        msg = '"IP address set to: '
+        if msg in str(reply):
+            self._log.debug(self._settings['url'] + " confirmed " + reply)
+            return True
+        else:
+            self._log.warning('IP address update failure: wanted ' + msg +'" but got '+reply)
+            return False
 
 """class EmonHubDispatcherInitError
 
