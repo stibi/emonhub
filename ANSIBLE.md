@@ -75,7 +75,11 @@ Now, create the Ansible playbook. Create a new file, `main.yml` with following c
 - name: Configure my RaspberryPi
   hosts: raspi
   roles:
-    - { role: emonhub-ansible-role, rfm12pi_group: 210, rfm12pi_freq: 868,rfm12pi_baseid: 1, emonhub_emoncms_apikey: "6a272ec63787809a59e4f56bfaac4f3b" }
+    - role: martin.stiborsky.emonhub-ansible-role
+      rfm12pi_group: 210
+      rfm12pi_freq: 868
+      rfm12pi_baseid: 1
+      emonhub_emoncms_apikey: "6a272ec63787809a59e4f56bfaac4f3b"
 ```
 
 Of course, you can assign more different roles to a host and ideally cover the complete configuration of a host. [I'm doing this](https://github.com/stibi/etc/blob/master/playbooks/main.yml), it's working very well and it's worth it, I can recommend.
@@ -113,7 +117,11 @@ The last step is to run the playbook. Use the following command:
 ansible-playbook -i inventory main.yml
 ```
 
-NOTE: maybe you are now surprised with cows (TODO screenshot), don't worry, you can [turn it off](http://docs.ansible.com/faq.html#how-do-i-disable-cowsay).
+NOTE: maybe you are now surprised with cows:
+
+![Ansible cows](https://dl.dropboxusercontent.com/u/3189942/pics/cowsay_shot.png)
+
+Don't worry, you can [turn it off](http://docs.ansible.com/faq.html#how-do-i-disable-cowsay).
 
 Ansible will execute all the task from the role and you should end up with working emonHub, installed on a Raspberry Pi.
 
